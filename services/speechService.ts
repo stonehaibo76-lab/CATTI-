@@ -1,5 +1,5 @@
-
 import { GoogleGenAI, Modality } from "@google/genai";
+import { getAIConfig } from "./geminiService";
 
 function decode(base64: string) {
   const binaryString = atob(base64);
@@ -32,67 +32,97 @@ async function decodeAudioData(
 }
 
 export const speakText = async (text: string, type: 'word' | 'sentence' = 'word') => {
-  try {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    const prompt = type === 'word' 
-      ? `Read this word clearly: ${text}` 
-      : `Read this sentence naturally: ${text}`;
+  // 1. 尝试使用 Gemini TTS (需要 Gemini Key)
+  const { geminiKey } = getAIConfig();
+  
+  if (geminiKey) {
+    try {
+      const ai = new GoogleGenAI({ apiKey: geminiKey });
+      const prompt = type === 'word' 
+        ? `Read this word clearly: ${text}` 
+        : `Read this sentence naturally: ${text}`;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-preview-tts",
-      contents: [{ parts: [{ text: prompt }] }],
-      config: {
-        responseModalities: [Modality.AUDIO],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: 'Kore' }, 
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash-preview-tts",
+        contents: [{ parts: [{ text: prompt }] }],
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: 'Kore' }, 
+            },
           },
         },
-      },
-    });
+      });
 
-    // 健壮性优化：遍历所有 parts 寻找 inlineData
-    let base64Audio: string | undefined;
-    const parts = response.candidates?.[0]?.content?.parts;
-    
-    if (parts) {
-      for (const part of parts) {
-        if (part.inlineData && part.inlineData.data) {
-          base64Audio = part.inlineData.data;
-          break;
+      // 健壮性优化：遍历所有 parts 寻找 inlineData
+      let base64Audio: string | undefined;
+      const parts = response.candidates?.[0]?.content?.parts;
+      
+      if (parts) {
+        for (const part of parts) {
+          if (part.inlineData && part.inlineData.data) {
+            base64Audio = part.inlineData.data;
+            break;
+          }
         }
       }
+
+      if (base64Audio) {
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+        const audioData = decode(base64Audio);
+        const audioBuffer = await decodeAudioData(audioData, audioContext, 24000, 1);
+        
+        const source = audioContext.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(audioContext.destination);
+        source.start();
+
+        return new Promise((resolve) => {
+          source.onended = () => {
+            audioContext.close();
+            resolve(true);
+          };
+          setTimeout(() => {
+            if (audioContext.state !== 'closed') {
+              audioContext.close();
+              resolve(false);
+            }
+          }, 10000);
+        });
+      }
+    } catch (error) {
+      console.warn("Gemini TTS failed, attempting browser fallback.", error);
     }
-
-    if (!base64Audio) {
-      console.error("Gemini TTS response structure:", response);
-      throw new Error("未能从 AI 响应中提取到音频数据。可能是触发了安全过滤或响应结构变化。");
-    }
-
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-    const audioData = decode(base64Audio);
-    const audioBuffer = await decodeAudioData(audioData, audioContext, 24000, 1);
-    
-    const source = audioContext.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(audioContext.destination);
-    source.start();
-
-    return new Promise((resolve) => {
-      source.onended = () => {
-        audioContext.close();
-        resolve(true);
-      };
-      // 容错处理：如果 10 秒后还没结束，强行 resolve
-      setTimeout(() => {
-        if (audioContext.state !== 'closed') {
-          audioContext.close();
-          resolve(false);
-        }
-      }, 10000);
-    });
-  } catch (error) {
-    console.error("Speech generation failed:", error);
-    return false;
   }
+
+  // 2. 降级方案：使用浏览器原生 Web Speech API
+  return new Promise((resolve) => {
+    try {
+        if (!window.speechSynthesis) {
+            console.error("Browser does not support SpeechSynthesis");
+            resolve(false);
+            return;
+        }
+
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'en-US';
+        utterance.rate = 0.9;
+        
+        // 尝试选择一个好听的英语声音
+        const voices = window.speechSynthesis.getVoices();
+        const preferredVoice = voices.find(v => v.name.includes('Google US English') || v.name.includes('Samantha'));
+        if (preferredVoice) utterance.voice = preferredVoice;
+
+        utterance.onend = () => resolve(true);
+        utterance.onerror = () => resolve(false);
+        
+        // 解决 Chrome 的一些 TTS bug，必须在用户交互后调用，但通常在点击事件中是安全的
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(utterance);
+    } catch (e) {
+        console.error("Browser TTS failed", e);
+        resolve(false);
+    }
+  });
 };

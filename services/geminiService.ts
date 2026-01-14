@@ -10,6 +10,71 @@ export const getAIConfig = () => {
   return { provider, geminiKey, deepseekKey };
 };
 
+// --- DeepSeek Adapter ---
+class DeepSeekClient {
+  private apiKey: string;
+  private baseUrl = "https://api.deepseek.com/chat/completions";
+
+  constructor(apiKey: string) {
+    this.apiKey = apiKey;
+  }
+
+  get models() {
+    return {
+      generateContent: async (params: any) => {
+        const isJson = params.config?.responseMimeType === "application/json";
+        
+        // Prepare content for OpenAI-compatible format
+        let contentStr = "";
+        if (typeof params.contents === 'string') {
+          contentStr = params.contents;
+        } else {
+          contentStr = JSON.stringify(params.contents);
+        }
+
+        const messages = [
+            { 
+              role: "system", 
+              content: "You are a helpful AI tutor for CATTI translation exams." + (isJson ? " You must output valid JSON." : "") 
+            },
+            { role: "user", content: contentStr }
+        ];
+
+        try {
+          const response = await fetch(this.baseUrl, {
+              method: "POST",
+              headers: {
+                  "Content-Type": "application/json",
+                  "Authorization": `Bearer ${this.apiKey}`
+              },
+              body: JSON.stringify({
+                  model: "deepseek-chat", // DeepSeek V3
+                  messages: messages,
+                  response_format: isJson ? { type: "json_object" } : { type: "text" },
+                  temperature: 1.3,
+                  max_tokens: 4096
+              })
+          });
+
+          if (!response.ok) {
+              const errText = await response.text();
+              throw new Error(`DeepSeek API request failed: ${response.status} - ${errText}`);
+          }
+
+          const data = await response.json();
+          const text = data.choices?.[0]?.message?.content || "";
+          
+          // Mimic GoogleGenAI response structure
+          return { text };
+        } catch (error: any) {
+          console.error("DeepSeek Call Failed", error);
+          throw new Error(error.message || "DeepSeek API request failed");
+        }
+      }
+    };
+  }
+}
+
 // Helper to get client instance based on config
 const getClient = () => {
   const { provider, geminiKey, deepseekKey } = getAIConfig();
@@ -18,19 +83,13 @@ const getClient = () => {
     if (!geminiKey) throw new Error("请在设置中配置 Gemini API Key");
     return new GoogleGenAI({ apiKey: geminiKey });
   } else {
-    // Basic DeepSeek Implementation (Mocked via GoogleGenAI interface for structure, 
-    // in real-world this would need a custom fetch implementation for OpenAI-compatible endpoints)
-    // For this demo, we enforce Gemini if DeepSeek key is missing, or alert user.
     if (!deepseekKey) throw new Error("请在设置中配置 DeepSeek API Key");
-    // NOTE: This library (@google/genai) is strictly for Google models.
-    // For DeepSeek, you would typically use `openai` package or `fetch`.
-    // To keep this app simple and working with the current architecture, 
-    // we will throw an error if user tries to use DeepSeek without implementing the fetch logic.
-    throw new Error("DeepSeek 模式暂未完全集成，请切换回 Gemini 使用 Google 的免费/付费模型。");
+    // Return the DeepSeek adapter which mimics the GoogleGenAI interface
+    return new DeepSeekClient(deepseekKey) as any;
   }
 };
 
-const MODEL_NAME = "gemini-2.5-flash"; // Fast and capable
+const MODEL_NAME = "gemini-2.5-flash"; // Used for Gemini, ignored by DeepSeek adapter
 
 // --- API Functions ---
 
@@ -275,8 +334,6 @@ export const generateWeeklyTest = async () => {
   4. translationEC: 一段英译汉原文 (source)。
   5. translationCE: 一段中译英原文 (source)。`;
 
-  // Complex schema omitted for brevity, using partial schema for key structures
-  // Ideally, full schema definition ensures strict adherence.
   const schema: Schema = {
     type: Type.OBJECT,
     properties: {
@@ -330,7 +387,7 @@ export const generateWeeklyTest = async () => {
   };
 
   const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash", // Use flash for larger context generation speed
+    model: "gemini-2.5-flash", 
     contents: prompt,
     config: {
       responseMimeType: "application/json",
