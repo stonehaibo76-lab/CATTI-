@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { AppView } from './types';
 import Sidebar from './components/Sidebar';
@@ -12,6 +11,7 @@ import TranslationLibrary from './components/TranslationLibrary';
 import AttendanceCalendar from './components/AttendanceCalendar';
 import MistakeNotebook from './components/MistakeNotebook';
 import CollocationTrainer from './components/CollocationTrainer';
+import HelpCenter from './components/HelpCenter';
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<AppView>(AppView.DASHBOARD);
@@ -38,6 +38,8 @@ const App: React.FC = () => {
         return <MistakeNotebook />;
       case AppView.COLLOCATIONS:
         return <CollocationTrainer />;
+      case AppView.HELP:
+        return <HelpCenter />;
       default:
         return <Dashboard onViewChange={setCurrentView} />;
     }

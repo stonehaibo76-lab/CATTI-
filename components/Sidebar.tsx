@@ -18,7 +18,8 @@ import {
   BookX,
   Link2,
   ExternalLink,
-  KeyRound
+  KeyRound,
+  CircleHelp
 } from 'lucide-react';
 import { getAIConfig } from '../services/geminiService';
 
@@ -132,16 +133,28 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onViewChange }: SidebarP
         ))}
       </nav>
 
-      <div className="p-4 border-t border-slate-100">
+      <div className="p-4 border-t border-slate-100 space-y-2">
+        <button 
+          onClick={() => onViewChange(AppView.HELP)}
+          className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
+              currentView === AppView.HELP
+                ? 'bg-indigo-50 text-indigo-600 shadow-sm'
+                : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'
+            }`}
+        >
+          <CircleHelp size={20} />
+          <span className="font-medium">使用帮助</span>
+        </button>
+
         <button 
           onClick={() => setShowSettings(true)}
-          className="w-full flex items-center gap-3 px-4 py-3 mb-4 rounded-xl text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition-all"
+          className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition-all"
         >
           <Settings size={20} />
           <span className="font-medium">AI 设置</span>
         </button>
 
-        <div className="bg-slate-50 rounded-xl p-4">
+        <div className="bg-slate-50 rounded-xl p-4 mt-4">
           <div className="flex justify-between items-center mb-2">
             <span className="text-xs font-semibold text-slate-400">180天总计划</span>
             <span className="text-xs font-bold text-indigo-600">{progress}%</span>
